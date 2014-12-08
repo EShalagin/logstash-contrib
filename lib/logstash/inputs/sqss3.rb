@@ -85,7 +85,7 @@ class LogStash::Inputs::SQSS3 < LogStash::Inputs::Threadable
     require "aws-sdk"
 
     @sqs = AWS::SQS.new(aws_options_hash)
-	@s3 = AWS::S3.new(aws_options_hash)
+	  @s3 = AWS::S3.new(aws_options_hash)
 
     begin
       @logger.debug("Connecting to AWS SQS queue", :queue => @queue)
@@ -102,35 +102,38 @@ class LogStash::Inputs::SQSS3 < LogStash::Inputs::Threadable
     @logger.debug("Polling SQS queue", :queue => @queue)
 
 
-	receive_opts = {
-		:limit => 1,
-		:visibility_timeout => @visibility_timeout
-	}
+    receive_opts = {
+      :limit => 1,
+      :visibility_timeout => @visibility_timeout
+    }
 
 	
 
     continue_polling = true
-	message_received = true
+	  message_received = true
     while running? && continue_polling && message_received
+      message_received = false
       continue_polling = run_with_backoff(30, 1) do
-		message_received = false
-        @sqs_queue.receive_message(receive_opts) do |message|
-          if message
-			message_received = true
-			jsonMessage=JSON.parse(message.body)
-			puts jsonMessage
-			record=jsonMessage["Records"][0]
-			puts record
-			bucket_description=record["s3"]["bucket"]
-			puts bucket_description
-			s3bucket = @s3.buckets[bucket_description["name"]]
-            s3bucket.objects.with_prefix(record["s3"]["object"]["key"]).each(:limit => 1) do |object|
-				process_log(output_queue, object)
-			end #    s3.objects         
-			message.delete
-          end # valid SQS message
-        end # receive_message
+        message=@sqs_queue.receive_message(receive_opts)
       end # run_with_backoff
+      if message
+        message_received = true
+        begin
+          jsonMessage=JSON.parse(message.body)
+          puts jsonMessage
+          record=jsonMessage["Records"][0]
+          puts record
+          bucket_description=record["s3"]["bucket"]
+          puts bucket_description
+          s3bucket = @s3.buckets[bucket_description["name"]]
+          s3bucket.objects.with_prefix(record["s3"]["object"]["key"]).each(:limit => 1) do |object|
+            process_log(output_queue, object)
+          end #    process each objects
+          message.delete
+        rescue  Exception => bang
+          @logger.error("Error reading SQS queue.", :error => bang, :queue => @queue)
+        end
+      end # valid SQS message
     end # polling loop
   end # def run
 
